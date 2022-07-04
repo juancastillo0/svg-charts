@@ -87,8 +87,14 @@ mixin FromJson {
 class ChartInfo with FromJson {
   final title = Observable('A bar chart');
   final description = Observable('This chart shows...');
+  final labelLegend = Observable('');
+  final valueLegend = Observable('');
   final width = Observable(300.0);
   final height = Observable(400.0);
+  final gridSeparations = Observable<int>(5);
+  final verticalBarChart = Observable(false);
+  final filledLineChart = Observable(false);
+  final padding = Observable(0.0);
   final maxValue = Observable<double?>(null);
   final showNumbers = Observable(false);
   final showGrid = Observable(false);
@@ -134,6 +140,24 @@ class ChartInfo with FromJson {
     if (json['isLineChart'] is bool) {
       isLineChart.value = json['isLineChart'] as bool;
     }
+    if (json['labelLegend'] is String) {
+      labelLegend.value = json['labelLegend'] as String;
+    }
+    if (json['valueLegend'] is String) {
+      valueLegend.value = json['valueLegend'] as String;
+    }
+    if (json['gridSeparations'] is int) {
+      gridSeparations.value = json['gridSeparations'] as int;
+    }
+    if (json['verticalBarChart'] is bool) {
+      verticalBarChart.value = json['verticalBarChart'] as bool;
+    }
+    if (json['filledLineChart'] is bool) {
+      filledLineChart.value = json['filledLineChart'] as bool;
+    }
+    if (json['padding'] is double) {
+      padding.value = json['padding'] as double;
+    }
     if (json['tableItems'] is List) {
       tableItems.clear();
       tableItems.addAll((json['tableItems'] as List).map(TableItem.fromJson));
@@ -151,6 +175,12 @@ class ChartInfo with FromJson {
         'showGrid': showGrid.value,
         'isLineChart': isLineChart.value,
         'tableItems': tableItems,
+        'labelLegend': labelLegend.value,
+        'valueLegend': valueLegend.value,
+        'gridSeparations': gridSeparations.value,
+        'verticalBarChart': verticalBarChart.value,
+        'filledLineChart': filledLineChart.value,
+        'padding': padding.value,
       };
 
   late final allIncreasing = Computed(() {
@@ -217,22 +247,50 @@ class ChartInfo with FromJson {
 </g>
 ''').join('\n');
     } else {
-      double x = 0;
-      final maxHeight = height.value - 65;
+      final yLabels = height.value - 40;
+      final xLabels = 40.0;
+      final top = 85.0;
+      final right = width.value - 20;
+
+      double x = xLabels;
+      final maxHeight = yLabels - top;
+      final maxWidth = right - xLabels;
       final deltaX =
-          tableItems.length == 1 ? 0 : width.value / (tableItems.length - 1);
+          tableItems.length == 1 ? 0 : maxWidth / (tableItems.length - 1);
+
+      final sorted = sortedByLabel.value;
+      final _xyValues = sorted.map((element) {
+        final _x = x;
+        x += deltaX;
+        return '$_x,${top + maxHeight - element.vertical.value / maxAbsoluteValue.value * maxHeight}';
+      }).toList();
 
       mainContent = '''
+<g class="grid x-grid" id="xGrid">
+  <line x1="$xLabels" x2="$xLabels" y1="$top" y2="$yLabels"></line>
+</g>
+<g class="grid y-grid" id="yGrid">
+  <line x1="$xLabels" x2="$right" y1="$yLabels" y2="$yLabels"></line>
+</g>
+  <g class="labels x-labels">
+  ${_xyValues.mapIndexed((i, e) {
+        return '<text x="${e.split(',').first}" y="${yLabels + 20}">${sorted[i].horizontal.value}</text>';
+      }).join('\n')}
+  <text x="${xLabels + maxWidth / 2}" y="${yLabels + 40}" class="label-title">${labelLegend.value}</text>
+</g>
+<g class="labels y-labels">
+  ${Iterable.generate(gridSeparations.value).map((i) {
+        final p = (gridSeparations.value - i) / gridSeparations.value;
+        return '<text x="${xLabels - 10}" y="${(1 - p) * maxHeight + top}">${p * maxAbsoluteValue.value}</text>';
+      }).join('\n')}
+  <text x="5" y="${top - 25}" class="label-title" style="text-anchor:start;">${valueLegend.value}</text>
+</g>
 <polyline
      fill="none"
      stroke="#0074d9"
      stroke-width="3"
      points="
-${sortedByLabel.value.map((element) {
-        final _x = x;
-        x += deltaX;
-        return '$_x,${height.value - element.vertical.value / maxAbsoluteValue.value * maxHeight}';
-      }).join('\n')}
+${_xyValues.join('\n')}
 /">''';
     }
 
@@ -253,25 +311,30 @@ $_svgStyle
 
 DeactNode _numberInput({
   required String id,
-  required Observable<double> observable,
-  String? title,
+  required Observable<num> observable,
+  required String title,
   String? placeholder,
 }) {
   return fc(
-    (ctx) => input(
-      className: formControlClass(size: BSize.sm),
-      type: 'number',
-      title: title,
-      placeholder: placeholder,
+    (ctx) => labeledInput(
+      label: txt(title),
+      input: input(
+        className: formControlClass(size: BSize.sm),
+        type: 'number',
+        title: title,
+        placeholder: placeholder,
+        id: id,
+        value: observable.value.toString(),
+        oninput: (e) {
+          final str = (e.target! as html.InputElement).value!;
+          final v = observable is Observable<int>
+              ? int.tryParse(str)
+              : double.tryParse(str);
+          if (v == null) return;
+          observable.value = v;
+        },
+      ),
       id: id,
-      value: observable.value.toString(),
-      oninput: (e) {
-        final v = double.tryParse(
-          (e.target! as html.InputElement).value!,
-        );
-        if (v == null) return;
-        observable.value = v;
-      },
     ),
   );
 }
@@ -398,11 +461,10 @@ class ChartForm extends ComponentNode {
               ),
             ),
             labeledInput(
-              wrapperDivClass: 'my-2 px-3',
+              wrapperDivClass: 'my-2 pe-4',
               label: txt('Description'),
               id: 'chart-description',
-              divClass: 'row',
-              // colClasses: colClasses,
+              // divClass: 'row',
               input: textarea(
                 className: formControlClass(size: BSize.sm) + ' mx-3',
                 placeholder: 'A bar chart showing information',
@@ -413,28 +475,45 @@ class ChartForm extends ComponentNode {
                 children: [txt(chart.description.value)],
               ),
             ),
-          ],
-        ),
-        div(
-          className: 'mb-2',
-          style: flexCenter(),
-          children: [
-            div(className: 'pl-3', children: [
+            div(style: 'width:100px;', className: 'ps-2', children: [
               _numberInput(
                 id: 'chart-width',
                 observable: chart.width,
                 title: 'Width',
               ),
             ]),
-            div(className: 'px-3', children: [
+            div(style: 'width:100px;', className: 'ps-3', children: [
               _numberInput(
                 id: 'chart-height',
                 observable: chart.height,
                 title: 'Height',
               ),
             ]),
+          ],
+        ),
+        div(
+          className: 'mb-2',
+          style: flexCenter(),
+          children: [
+            div(style: 'width:120px;', className: 'ps-3', children: [
+              _numberInput(
+                id: 'padding',
+                observable: chart.padding,
+                title: 'Padding',
+              ),
+            ]),
+            div(style: 'width:120px;', className: 'px-3', children: [
+              _numberInput(
+                id: 'grid-separations',
+                observable: chart.gridSeparations,
+                title: 'Grid Lines',
+              ),
+            ]),
             check(
-              label: span(children: [txt('Show Grid')]),
+              label: span(
+                style: 'white-space: pre;',
+                children: [txt('Show Grid')],
+              ),
               inline: true,
               name: 'showGrid',
               checked: chart.showGrid.value,
@@ -444,7 +523,10 @@ class ChartForm extends ComponentNode {
               onChange: (checked) => chart.showGrid.value = checked,
             ),
             check(
-              label: txt('Show Numbers'),
+              label: span(
+                style: 'white-space: pre;',
+                children: [txt('Show Numbers')],
+              ),
               inline: true,
               name: 'showNumbers',
               checked: chart.showNumbers.value,
@@ -454,7 +536,10 @@ class ChartForm extends ComponentNode {
               onChange: (checked) => chart.showNumbers.value = checked,
             ),
             check(
-              label: span(children: [txt('Line Chart')]),
+              label: span(
+                style: 'white-space: pre;',
+                children: [txt('Line Chart')],
+              ),
               inline: true,
               name: 'isLineChart',
               checked: chart.isLineChart.value,
@@ -463,6 +548,34 @@ class ChartForm extends ComponentNode {
               id: 'line-chart',
               onChange: (checked) => chart.isLineChart.value = checked,
             ),
+            if (chart.isLineChart.value)
+              check(
+                label: span(
+                  style: 'white-space: pre;',
+                  children: [txt('Filled Line')],
+                ),
+                inline: true,
+                name: 'filledLineChart',
+                checked: chart.filledLineChart.value,
+                type: CheckType.switch_,
+                // labelStyle: 'width:120px;',
+                id: 'filled-line-chart',
+                onChange: (checked) => chart.filledLineChart.value = checked,
+              ),
+            if (!chart.isLineChart.value)
+              check(
+                label: span(
+                  style: 'white-space: pre;',
+                  children: [txt('Vertical Bars')],
+                ),
+                inline: true,
+                name: 'verticalBarChart',
+                checked: chart.verticalBarChart.value,
+                type: CheckType.switch_,
+                // labelStyle: 'width:120px;',
+                id: 'vertical-bar-chart',
+                onChange: (checked) => chart.verticalBarChart.value = checked,
+              ),
           ],
         ),
       ],
@@ -475,7 +588,8 @@ class MainTable extends ComponentNode {
 
   @override
   DeactNode render(ComponentContext ctx) {
-    final tableItems = RootStore.ref.get(ctx).selectedChart.tableItems;
+    final chart = RootStore.ref.get(ctx).selectedChart;
+    final tableItems = chart.tableItems;
 
     return table(
       className: tableClass(
@@ -486,7 +600,7 @@ class MainTable extends ComponentNode {
         // striped: true,
         small: true,
         // color: color.value,
-        // align: align.value,
+        align: VerticalAlign.top,
         // scrollHorizontal: scrollHorizontal.value,
       ),
       children: [
@@ -496,8 +610,38 @@ class MainTable extends ComponentNode {
             tr(
               children: [
                 th(scope: 'col', children: [txt('#')]),
-                th(scope: 'col', children: [txt('Label')]),
-                th(scope: 'col', children: [txt('Value')]),
+                th(scope: 'col', children: [
+                  div(style: flexStyle(main: AxisAlign.start), children: [
+                    span(className: 'pe-2', children: [txt('Label')]),
+                    input(
+                      className: formControlClass(size: BSize.sm),
+                      type: 'text',
+                      id: 'label-legend',
+                      value: chart.labelLegend.value,
+                      oninput: (e) => chart.labelLegend.value =
+                          (e.target! as html.InputElement).value!,
+                    ),
+                  ]),
+                ]),
+                th(
+                  scope: 'col',
+                  children: [
+                    div(
+                      style: flexStyle(main: AxisAlign.start),
+                      children: [
+                        span(className: 'pe-2', children: [txt('Value')]),
+                        input(
+                          className: formControlClass(size: BSize.sm),
+                          type: 'text',
+                          id: 'value-legend',
+                          value: chart.valueLegend.value,
+                          oninput: (e) => chart.valueLegend.value =
+                              (e.target! as html.InputElement).value!,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
                 th(scope: 'col', children: [txt('Color')]),
               ],
             ),
@@ -615,6 +759,31 @@ const _svgStyle = '''
   .bar:hover text,
   .bar:focus text {
     fill: red;
+  }
+
+  .chart .labels.x-labels {
+    text-anchor: middle;
+  }
+  .chart .labels.y-labels {
+    text-anchor: end;
+  }
+  .chart .grid {
+    stroke: #ccc;
+    stroke-dasharray: 0;
+    stroke-width: 1;
+  }
+  .labels {
+    font-size: 13px;
+  }
+  .label-title {
+    font-weight: bold;
+    text-transform: uppercase;
+    font-size: 12px;
+    fill: black;
+  }
+  .data {
+    fill: red;
+    stroke-width: 1; 
   }
 </style>
 ''';
